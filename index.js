@@ -2,9 +2,7 @@ require('dotenv').config()
 
 const port = process.env.PORT || 3000
 
-const NodeCache = require( "node-cache" );
-const authorizationRequests = new NodeCache( { stdTTL: 100, checkperiod: 120 } );
-const tokens = {}
+const storage = { token: undefined }
 
 const { Issuer, generators } = require('openid-client')
 
@@ -21,6 +19,7 @@ let _auth0Client
 async function getAuth0Issuer() {
     if(!_auth0Issuer) {
         _auth0Issuer = await Issuer.discover(process.env.AUTH0_DOMAIN)
+        _auth0Issuer.end_session_endpoint = `${process.env.AUTH0_DOMAIN}/v2/logout`
         console.log(_auth0Issuer)
     }
 
@@ -35,7 +34,7 @@ async function getAuth0Client() {
             client_secret: process.env.AUTH0_CLIENT_SECRET,
             redirect_uris: ['http://localhost:3000/callback'],
             response_types: ['code'],
-            token_endpoint_auth_method: 'client_secret_post'
+            token_endpoint_auth_method: 'client_secret_post',
         })
         console.log(_auth0Client)
     }
@@ -45,7 +44,15 @@ async function getAuth0Client() {
 
 app.use(cookieParser())
 
-app.get('/login', async (req, res, next) => {
+app.get('/', async (req, res, next) => {
+    try {
+        res.json(storage)
+    } catch(error) {
+        next(error)
+    }
+})
+
+app.get('/connect', async (req, res, next) => {
     try {
         const auth0Client = await getAuth0Client()
         const codeVerifier = generators.codeVerifier()
@@ -55,10 +62,10 @@ app.get('/login', async (req, res, next) => {
 
         const authorizationUrl = auth0Client.authorizationUrl({
             scope: `openid ${process.env.AUTH0_SCOPE}`,
-            resource: process.env.AUTH0_AUDIENCE,
             code_challenge: codeChallenge,
             code_challenge_method: 'S256',
-            state
+            state,
+            audience: process.env.AUTH0_AUDIENCE
         })
         console.log(authorizationUrl)
 
@@ -69,6 +76,17 @@ app.get('/login', async (req, res, next) => {
             httpOnly: true
         })
         res.redirect(authorizationUrl)
+    } catch(error) {
+        next(error)
+    }
+})
+
+app.get('/disconnect', async (req, res, next) => {
+    try {
+        const auth0Client = await getAuth0Client()
+        const logoutUrl = auth0Client.endSessionUrl({})
+        storage.token = undefined
+        res.redirect(logoutUrl)
     } catch(error) {
         next(error)
     }
@@ -93,11 +111,13 @@ app.get('/callback', async (req, res, next) => {
         const params = auth0Client.callbackParams(req)
         console.log(params)
 
-        const token = await auth0Client.callback(auth0Client.redirect_uris[0], params, {
+        const token = await auth0Client.oauthCallback(auth0Client.redirect_uris[0], params, {
             code_verifier: codeVerifier,
             state
         })
         console.log(token)
+
+        storage.token = token
 
         res.json(token)
     } catch(error) {
