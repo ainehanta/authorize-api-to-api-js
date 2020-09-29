@@ -61,7 +61,7 @@ app.get('/connect', async (req, res, next) => {
         const state = generators.state()
 
         const authorizationUrl = auth0Client.authorizationUrl({
-            scope: `openid ${process.env.AUTH0_SCOPE}`,
+            scope: process.env.AUTH0_SCOPE,
             code_challenge: codeChallenge,
             code_challenge_method: 'S256',
             state,
